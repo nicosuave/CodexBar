@@ -456,6 +456,9 @@ enum CostUsageScanner {
         startOffset: Int64 = 0) -> ClaudeParseResult
     {
         var days: [String: [String: [Int]]] = [:]
+        // Track seen message+request IDs to deduplicate streaming chunks
+        // (Claude emits multiple lines per message with cumulative usage)
+        var seenKeys: Set<String> = []
 
         struct ClaudeTokens: Sendable {
             let input: Int
@@ -504,6 +507,15 @@ enum CostUsageScanner {
                 guard let message = obj["message"] as? [String: Any] else { return }
                 guard let model = message["model"] as? String else { return }
                 guard let usage = message["usage"] as? [String: Any] else { return }
+
+                // Deduplicate by message.id + requestId (streaming chunks have same usage)
+                let messageId = message["id"] as? String
+                let requestId = obj["requestId"] as? String
+                if let messageId, let requestId {
+                    let key = "\(messageId):\(requestId)"
+                    if seenKeys.contains(key) { return }
+                    seenKeys.insert(key)
+                }
 
                 func toInt(_ v: Any?) -> Int {
                     if let n = v as? NSNumber { return n.intValue }
